@@ -1,0 +1,140 @@
+from dronekit import connect, VehicleMode, LocationGlobalRelative
+from pymavlink import mavutil # Needed for command message definitions
+import numpy as np
+import time
+from geopy.distance import geodesic
+
+
+
+class Drone():
+    # (22.9049399147239,120.272397994995,27.48,0) 長榮大學 圖書館前 機頭朝北
+    def __init__(self, connection_string):  
+        print("Connecting to vehicle on: %s" % connection_string)
+        self.connected = True
+        try:
+            self.vehicle = connect(connection_string, wait_ready=True)
+        except Exception as e:
+            print(e)
+            self.connected = False
+             
+    def preArmCheck(self):
+        while not self.vehicle.is_armable:
+            print(" Waiting for vehicle to initialise...")
+            time.sleep(1)
+        print("Arming motors")
+        # Copter should arm in GUIDED mode
+        self.vehicle.mode = VehicleMode("GUIDED")
+        self.vehicle.armed = True
+
+        # Confirm vehicle armed before attempting to take off
+        while not self.vehicle.armed:
+            self.vehicle.mode = VehicleMode("GUIDED")
+            self.vehicle.armed = True
+            print(" Waiting for arming...")
+            time.sleep(1)
+
+        # Let the propeller spin for a while to warm up so as to increase stability during takeoff
+        time.sleep(2)
+
+    def takeoff(self, aTargetAltitude):
+        """
+        In Guided mode, arms vehicle and fly to aTargetAltitude.
+        """
+        self.preArmCheck() #切換為Guided模式，無人機解鎖
+        self.vehicle.simple_takeoff(aTargetAltitude)  # Take off to target altitude
+        # Wait until the vehicle reaches a safe height before processing the goto
+        while True:
+            if self.vehicle.location.global_relative_frame.alt >= aTargetAltitude * 0.95:
+               break
+            time.sleep(1)
+  
+    def land(self):
+        while(self.vehicle.mode != VehicleMode("LAND")):
+            self.vehicle.mode = VehicleMode("LAND")
+        print("Landing")
+    
+    def get_state(self):
+        stateobj = {
+            "Mode" : self.vehicle.mode.name,
+            "BatteryVoltage" :self.vehicle.battery.voltage, 
+            "BatteryCurrent" :self.vehicle.battery.current,
+            "BatteryLevel":self.vehicle.battery.level,
+            "IsArmable" : self.vehicle.is_armable,
+            "armed" : self.vehicle.armed,
+            "airspeed": self.vehicle.airspeed,
+            "SystemStatus" : self.vehicle.system_status.state,
+            "GlobalLat" : self.vehicle.location.global_frame.lat,
+            "GlobalLon" : self.vehicle.location.global_frame.lon,
+            "SeaLevelAltitude" : self.vehicle.location.global_frame.alt,
+            "RelativeAlt" : self.vehicle.location.global_relative_frame.alt,
+            "localAlt":self.vehicle.location.local_frame.down
+        }
+        if(self.vehicle.home_location!=None):
+            stateobj["homeLocationAlt"]=self.vehicle.home_location.alt
+            stateobj["homeLocationLat"]=self.vehicle.home_location.lat
+            stateobj["homeLocationLon"]=self.vehicle.home_location.lon
+
+        print(stateobj)
+    
+    def condition_yaw(self,heading, relative=False):
+        if relative:
+            is_relative = 1 #yaw relative to direction of travel
+        else:
+            is_relative = 0 #yaw is an absolute angle
+        # create the CONDITION_YAW command using command_long_encode()
+        msg =self.vehicle.message_factory.command_long_encode(
+            0, 0,    # target system, target component
+            mavutil.mavlink.MAV_CMD_CONDITION_YAW, #command
+            0, #confirmation
+            heading,    # param 1, yaw in degrees
+            0,          # param 2, yaw speed deg/s
+            1,          # param 3, direction -1 ccw, 1 cw
+            is_relative, # param 4, relative offset 1, absolute angle 0
+            0, 0, 0)    # param 5 ~ 7 not used
+        # send command to vehicle
+        self.vehicle.send_mavlink(msg)
+        self.vehicle.flush()
+
+    def send_global_velocity(self, north, east, down=0):
+        
+        msg = self.vehicle.message_factory.set_position_target_global_int_encode(
+        0,       # time_boot_ms (not used)
+        0, 0,    # target system, target component
+        mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, # frame
+        0b0000111111000111, # type_mask (only speeds enabled)
+        0, # lat_int - X Position in WGS84 frame in 1e7 * meters
+        0, # lon_int - Y Position in WGS84 frame in 1e7 * meters
+        0, # alt - Altitude in meters in AMSL altitude(not WGS84 if absolute or relative)
+        # altitude above terrain if GLOBAL_TERRAIN_ALT_INT
+        north, # X velocity in NED frame in m/s
+        east, # Y velocity in NED frame in m/s
+        down, # Z velocity in NED frame in m/s
+        0, 0, 0, # afx, afy, afz acceleration (not supported yet, ignored in GCS_Mavlink)
+        0, 0)    # yaw, yaw_rate (not supported yet, ignored in GCS_Mavlink) 
+        self.vehicle.send_mavlink(msg)
+        self.vehicle.flush()
+        # send command to vehicle on 1 Hz cycle
+        #for x in range(0,duration):
+        #    vehicle.send_mavlink(msg)
+        #    time.sleep(1)   
+    
+    def read_global_position(self):
+        return self.vehicle.location.global_relative_frame
+    
+    def close_conn(self):
+        #print("Close connection to vehicle")
+        self.vehicle.close()
+
+
+
+
+
+
+
+
+
+    
+
+
+
+
