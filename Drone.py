@@ -5,7 +5,6 @@ import time
 from geopy.distance import geodesic
 
 
-
 class Drone():
     # (22.9049399147239,120.272397994995,27.48,0) 長榮大學 圖書館前 機頭朝北
     def __init__(self, connection_string):  
@@ -17,32 +16,34 @@ class Drone():
             print(e)
             self.connected = False
              
-    def preArmCheck(self):
+    def set_guided_and_arm(self):
+        """
+        Set the UAV to GUIDED mode and arm the UAV 
+        """
         while not self.vehicle.is_armable:
             print(" Waiting for vehicle to initialise...")
             time.sleep(1)
-        print("Arming motors")
+        
         # Copter should arm in GUIDED mode
-        self.vehicle.mode = VehicleMode("GUIDED")
-        self.vehicle.armed = True
-
-        # Confirm vehicle armed before attempting to take off
-        while not self.vehicle.armed:
+        while self.vehicle.mode != VehicleMode("GUIDED"):
             self.vehicle.mode = VehicleMode("GUIDED")
+            time.sleep(1)
+
+        self.vehicle.armed = True
+        # Confirm vehicle armed
+        while not self.vehicle.armed:
             self.vehicle.armed = True
             print(" Waiting for arming...")
             time.sleep(1)
-
         # Let the propeller spin for a while to warm up so as to increase stability during takeoff
         time.sleep(2)
 
     def takeoff(self, aTargetAltitude):
         """
-        In Guided mode, arms vehicle and fly to aTargetAltitude.
+        In Guided mode, take off the UAV to the target altitude (aTargetAltitude). 
         """
-        self.preArmCheck() #切換為Guided模式，無人機解鎖
         self.vehicle.simple_takeoff(aTargetAltitude)  # Take off to target altitude
-        # Wait until the vehicle reaches a safe height before processing the goto
+        # Wait until the vehicle reaches a safe height
         while True:
             if self.vehicle.location.global_relative_frame.alt >= aTargetAltitude * 0.95:
                break
@@ -54,6 +55,9 @@ class Drone():
         print("Landing")
     
     def get_state(self):
+        """
+        Return the states of the UAV in a dictionary
+        """
         stateobj = {
             "Mode" : self.vehicle.mode.name,
             "BatteryVoltage" :self.vehicle.battery.voltage, 
@@ -74,9 +78,13 @@ class Drone():
             stateobj["homeLocationLat"]=self.vehicle.home_location.lat
             stateobj["homeLocationLon"]=self.vehicle.home_location.lon
 
-        print(stateobj)
+        #print(stateobj)
+        return stateobj
     
     def condition_yaw(self,heading, relative=False):
+        """
+        yaw speed: 90 deg/s
+        """
         if relative:
             is_relative = 1 #yaw relative to direction of travel
         else:
@@ -87,7 +95,7 @@ class Drone():
             mavutil.mavlink.MAV_CMD_CONDITION_YAW, #command
             0, #confirmation
             heading,    # param 1, yaw in degrees
-            0,          # param 2, yaw speed deg/s
+            90,         # param 2, yaw speed deg/s
             1,          # param 3, direction -1 ccw, 1 cw
             is_relative, # param 4, relative offset 1, absolute angle 0
             0, 0, 0)    # param 5 ~ 7 not used
@@ -119,19 +127,20 @@ class Drone():
         #    time.sleep(1)   
     
     def read_global_position(self):
+        """
+        return LocationGlobalRelative: (p.lat, p.lon, p.alt)
+        """
         return self.vehicle.location.global_relative_frame
     
+    def read_local_velocity(self):
+        """
+        return a list [vx, vy, vz] in meter/sec
+        """
+        return self.vehicle.velocity
+       
     def close_conn(self):
         #print("Close connection to vehicle")
         self.vehicle.close()
-
-
-
-
-
-
-
-
 
     
 
