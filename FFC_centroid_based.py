@@ -1,7 +1,7 @@
-from dronekit import LocationGlobalRelative
+from dronekit import LocationGlobalRelative, LocationGlobal
 from Drone import Drone
 import numpy as np
-from helpers import Waypoint, calculate_desired_positions_global, calculate_yaw_angle
+from helpers import calculate_desired_positions_global, calculate_yaw_angle, interpolate_waypoints
 import time
 from geopy.distance import geodesic
 
@@ -9,19 +9,19 @@ from geopy.distance import geodesic
 ''' Loosely based on the following paper: https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=6798711'''
 
 class FormationFlying(object):
-    def __init__(self, num_uavs: int, port: int, takeoff_altitude: int, collision_threshold=10.0):
+    def __init__(self, num_uavs: int, port: int, takeoff_altitude: int, collision_threshold: int=10.0):
         self.num_uavs = num_uavs
         self.drones = []
         for i in range(num_uavs):
             #self.drones.append(Vehicle(f'udpin:localhost:{port + 10 * i}'))
             self.drones.append(Drone(f'tcp:localhost:{port + 10 * i}')) #port: 5762
 
-        self.takeoff_altitude = takeoff_altitude
-        self.max_velocity = 1.2  # Reduced for better control
+        self.takeoff_altitude = takeoff_altitude # meter
+        self.max_velocity = 3  # Reduced for better control(m/sec)
         self.wp_radius = 1.5  # Adjusted for better tolerance
         self.formation_tolerance = 0.5  # Tolerance for formation achievement
-        self.collision_threshold = collision_threshold        
-
+        self.collision_threshold = collision_threshold
+        
         # Formation control gains
         self.K1 = np.array([[0.7, 0], [0, 0.7]])  # Acts on the position error (Proportional Gain)
         self.damping = 0.4  # Damping factor to control high frequency velocity changes (overshoot and oscillations)
@@ -31,7 +31,7 @@ class FormationFlying(object):
             np.array([-10, -10]), # north, east , unit: meter 
             np.array([10, -10]),
             np.array([-10, 10]),
-            np.array([10, 10])
+            np.array([10, 10])            
         ]
         """
         2          3
@@ -91,7 +91,7 @@ class FormationFlying(object):
         if desired_pos[1] < current_pos[1]:
             error_meters[1] = -error_meters[1]
 
-        velocity = np.array(velocity) 
+        velocity = np.array(velocity) #velocity:a list [vx, vy] in meter/sec
         control_input_vel = self.K1 @ error_meters - self.damping * velocity
 
         formation_velocity = self.calculate_formation_velocity(i, self.drones[i].read_global_position())
@@ -101,34 +101,30 @@ class FormationFlying(object):
     
     def initialize_formation(self, formation_center=None): # take off and format UAVs  
         print("Starting Mission!")
+        self.home=[]
+        for i in range(self.num_uavs):
+            home=self.drones[i].get_home_location()
+            print(f"UAV {i} home location set: {home.lat}, {home.lon}, {home.alt}")
+            self.home.append(home)          
+ 
         while(input("\033[93m {}\033[00m" .format("Change UAVs to GUIDED mode and arm? y/n\n")) != "y"):
             pass
 
         for i in range(self.num_uavs): # change drone to GUIDED mode and arm
-            self.drone[i].set_guided_and_arm()
+            self.drones[i].set_guided_and_arm()
             print(f"UAV {i} changed mode to GUIDED and armed successfully!")
-
-        while(input("\033[93m {}\033[00m" .format("Take off  UAVs ? y/n\n")) != "y"):
-            pass
+            self.drones[i].takeoff(self.takeoff_altitude)
+            print(f"UAV {i} took off successfully!") 
         
-        #takeoff_check_flag = True
-        for i in range(self.num_uavs): # take off all the UAVs
-            self.drone[i].takeoff(self.take_off_altitude) 
-            print(f"UAV {i} took off successfully!")
-
-        #if not takeoff_check_flag:
-        #    print("Error in arming and taking off! Aborting mission!")
-        #    return
-
-        print("All UAVs in the air!")
-
+        while(input("\033[93m {}\033[00m" .format("Make sure All UAVs in the air! ? y/n\n")) != "y"):
+            pass
         # Formation Initialization
         self.yaw = [0,0,0,0]
         # formation_center = self.drones[0].read_global_position()  # Use the first drone position as the formation center
         desired_positions = calculate_desired_positions_global(formation_center, self.formation_offsets) 
 
         forming = True
-        self.yaw_update_interval = 30  # Correct yaw every 30 seconds during waypoint following
+        self.yaw_update_interval =30  # Correct yaw every 30 seconds during waypoint following
         self.yaw_update_time = time.time()
 
         print("Initializing Formation!")
@@ -140,71 +136,85 @@ class FormationFlying(object):
                 desired_pos = desired_positions[i] #LocationGlobalRelative(lat, lon , 0)
                 velocity = np.array(self.drones[i].read_local_velocity()) #a list [vx, vy, vz] in meter/sec
 
-                self.yaw[i] = calculate_yaw_angle(current_pos, formation_center) #yaw_degree
+                #self.yaw[i] = calculate_yaw_angle(current_pos, formation_center) #yaw_degree
                 control_input = self.calculate_control_input_global(current_pos, desired_pos, velocity[:2], i)
                 #current_pos, desired_pos : #LocationGlobalRelative(lat, lon , 0)                
-                self.drones[i].condition_yaw(self.yaw[i]) #yaw speed: 90 degree/sec
-                
+                #self.drones[i].condition_yaw(self.yaw[i]) #yaw speed: 90 degree/sec
+                self.drones[i].send_global_velocity(control_input[0],control_input[1])
                 # Check if the UAV is within the formation radius with tolerance
                 distance_to_formation = geodesic((current_pos.lat, current_pos.lon), (desired_pos.lat, desired_pos.lon)).meters
                 # print(f"Drone {i} Distance to Formation: {distance_to_formation}")
                 if distance_to_formation > self.wp_radius + self.formation_tolerance:
                     forming = True
 
-            time.sleep(0.1)
+            time.sleep(0.5)
         print("Formation Achieved! Proceeding to Waypoints")
 
     def waypoint_following(self, waypoint):
 
-        formation_center = waypoint
+        formation_center = waypoint #LocationGlobalRelative(lat, lon , 0)
         desired_positions = calculate_desired_positions_global(formation_center, self.formation_offsets)
-
-        reached_waypoint = False
-        while not reached_waypoint:
+        #a list of LocationGlobalRelative(lat, lon , 0)
+        reached_waypoint = [False] * self.num_uavs
+               
+        #while not reached_waypoint:
+        while not all(reached_waypoint):
             for i in range(self.num_uavs):
-                current_pos = self.drones[i].read_global_position()
-                desired_pos = desired_positions[i]
-                velocity = np.array(self.drones[i].read_local_velocity())
+                if not reached_waypoint[i]: 
+                    current_pos = self.drones[i].read_global_position() #LocationGlobalRelative
+                    desired_pos = desired_positions[i]
+                    velocity = np.array(self.drones[i].read_local_velocity())
 
-                control_input = self.calculate_control_input_global(current_pos, desired_pos, velocity[:2], i)
+                    control_input = self.calculate_control_input_global(current_pos, desired_pos, velocity[:2], i)
+                    self.drones[i].send_global_velocity(control_input[0],control_input[1])
+                    # Check if the UAV is within the waypoint radius
+                    distance_to_waypoint = geodesic((current_pos.lat, current_pos.lon), (desired_pos.lat, desired_pos.lon)).meters
+                    # print(f"Drone {i} Distance to Waypoint: {distance_to_waypoint}")
+                    # print(distance_to_waypoint<self.wp_radius)
+                    if distance_to_waypoint < self.wp_radius:
+                        reached_waypoint[i] = True
 
-                # Check if the UAV is within the waypoint radius
-                distance_to_waypoint = geodesic((current_pos.lat, current_pos.lon), (desired_pos.lat, desired_pos.lon)).meters
-                # print(f"Drone {i} Distance to Waypoint: {distance_to_waypoint}")
-                # print(distance_to_waypoint<self.wp_radius)
-                if distance_to_waypoint < self.wp_radius:
-                    reached_waypoint = True
-
-                #if not reached_waypoint:
-                #    self.drones[i].update_velocity_yaw(control_input[0], control_input[1], 0, self.yaw[i])
-
+            """
             # Periodically update yaw
             if time.time() - self.yaw_update_time > self.yaw_update_interval:
                 for i in range(self.num_uavs):
                     current_pos = self.drones[i].read_global_position()
                     self.yaw[i] = calculate_yaw_angle(current_pos, formation_center)
-                    # print(f"Yaw for UAV {i}: {self.yaw[i]}")
+                    #print(f"Yaw for UAV {i}: {self.yaw[i]}")
                     self.drones[i].condition_yaw(self.yaw[i])
                 self.yaw_update_time = time.time()
 
-                time.sleep(0.1)
+                time.sleep(1)
+             """
+        time.sleep(1)
 
-        time.sleep(0.1)
-
+    def rtl(self):
+        for drone in self.drones:
+            drone.rtl()
+            time.sleep(0.2)
 if __name__ == "__main__":
     num_uavs = 4
     port = 5762
-    takeoff_altitude = 10
+    takeoff_altitude = 15
+    #formation_center=LocationGlobalRelative(22.9051598, 120.2721620 , 0) 
     waypoints = [
-        Waypoint(), #formation center
-        Waypoint(22.9074872, 120.2767968),
-        Waypoint(22.9104125, 120.2715182),
-        Waypoint(22.9070326, 120.2673769)
+        LocationGlobalRelative(22.9051598, 120.2721620, 0), # formation_center
+        LocationGlobalRelative(22.9061728, 120.2742004, 0),
+        LocationGlobalRelative(22.9067361, 120.2721834, 0),
+        LocationGlobalRelative(22.9056885, 120.2706814, 0),
+        LocationGlobalRelative(22.9051598, 120.2721620, 0)  # formation_center
     ]
-
+    new_waypoints=[]
     formation_flying = FormationFlying(num_uavs, port, takeoff_altitude)
-    formation_flying.initialize_formation()
-    for waypoint in waypoints:
+    formation_flying.initialize_formation(waypoints[0])
+    for i in range(len(waypoints) - 1):
+        segment = [waypoints[i], waypoints[i + 1]]
+        interpolated = interpolate_waypoints(segment, 3)
+        new_waypoints.extend(interpolated)
+    for waypoint in new_waypoints:
         formation_flying.waypoint_following(waypoint)
+    
+    formation_flying.rtl()# TODO 要先設定各台的RTL高度，從最低高度的開始RTL
     print("Mission Completed!")
+
     

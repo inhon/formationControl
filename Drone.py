@@ -1,4 +1,4 @@
-from dronekit import connect, VehicleMode, LocationGlobalRelative
+from dronekit import connect, VehicleMode, LocationGlobalRelative, LocationGlobal
 from pymavlink import mavutil # Needed for command message definitions
 import numpy as np
 import time
@@ -52,6 +52,7 @@ class Drone():
     def land(self):
         while(self.vehicle.mode != VehicleMode("LAND")):
             self.vehicle.mode = VehicleMode("LAND")
+            time.sleep(0.2)
         print("Landing")
     
     def get_state(self):
@@ -81,6 +82,15 @@ class Drone():
         #print(stateobj)
         return stateobj
     
+    def get_home_location(self):
+        while self.vehicle.home_location is None:
+            print(f"waiting for UAV home location.")
+            self.vehicle.commands.download()
+            self.vehicle.commands.wait_ready()
+            time.sleep(1)
+        return self.vehicle.home_location       
+       
+
     def condition_yaw(self,heading, relative=False):
         """
         yaw speed: 90 deg/s
@@ -137,11 +147,34 @@ class Drone():
         return a list [vx, vy, vz] in meter/sec
         """
         return self.vehicle.velocity
-       
+ 
+    def send_global_velocity(self, north, east, down=0):        
+        msg = self.vehicle.message_factory.set_position_target_global_int_encode(
+        0,       # time_boot_ms (not used)
+        0, 0,    # target system, target component
+        mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, # frame
+        0b0000111111000111, # type_mask (only speeds enabled)
+        0, # lat_int - X Position in WGS84 frame in 1e7 * meters
+        0, # lon_int - Y Position in WGS84 frame in 1e7 * meters
+        0, # alt - Altitude in meters in AMSL altitude(not WGS84 if absolute or relative)
+        # altitude above terrain if GLOBAL_TERRAIN_ALT_INT
+        north, # X velocity in NED frame in m/s
+        east, # Y velocity in NED frame in m/s
+        down, # Z velocity in NED frame in m/s
+        0, 0, 0, # afx, afy, afz acceleration (not supported yet, ignored in GCS_Mavlink)
+        0, 0)    # yaw, yaw_rate (not supported yet, ignored in GCS_Mavlink) 
+        self.vehicle.send_mavlink(msg)
+        self.vehicle.flush()
+        
     def close_conn(self):
         #print("Close connection to vehicle")
         self.vehicle.close()
 
+    def rtl(self):
+        while(self.vehicle.mode != VehicleMode("RTL")):
+            self.vehicle.mode = VehicleMode("RTL")
+            time.sleep(0.2)
+        print("RTL")
     
 
 

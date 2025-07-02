@@ -20,10 +20,10 @@ def calculate_desired_positions_global(formation_center:LocationGlobalRelative, 
         new_lat = new_position.latitude
         new_position = geodesic(meters=offset[1]).destination((new_lat, formation_center.lon), 90)  # Offset in the east direction
         new_lon = new_position.longitude
-        desired_positions.append(LocationGlobalRelative(new_lat, new_lon))
+        desired_positions.append(LocationGlobalRelative(new_lat, new_lon, 0))
     return desired_positions
 
-def interpolate_waypoints(waypoints: list, num_points: int): 
+def interpolate_waypoints(waypoints: list, num_points: int)->list: 
     '''
     Interpolate between the waypoints given in the list to generate a new waypoint_list.
     waypoints: List of waypoints(LocationGlobalRelative(lat, lon , 0)) to interpolate between.
@@ -39,7 +39,7 @@ def interpolate_waypoints(waypoints: list, num_points: int):
     interpolated_waypoints.append(waypoints[-1])
     return interpolated_waypoints
 
-def calculate_yaw_angle(current_pos, center_pos):
+def calculate_yaw_angle(current_pos:LocationGlobalRelative , center_pos:LocationGlobalRelative)->float:
     delta_y = center_pos.lat - current_pos.lat
     delta_x = center_pos.lon - current_pos.lon
     yaw = math.atan2(delta_y, delta_x)
