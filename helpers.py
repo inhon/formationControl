@@ -33,17 +33,15 @@ def interpolate_waypoints(waypoints: list, num_points: int)->list:
     for i in range(len(waypoints) - 1):
         lat_diff = (waypoints[i + 1].lat - waypoints[i].lat) / num_points
         lon_diff = (waypoints[i + 1].lon - waypoints[i].lon) / num_points
-
         for j in range(num_points):
             interpolated_waypoints.append(LocationGlobalRelative(waypoints[i].lat + j * lat_diff, waypoints[i].lon + j * lon_diff, 0))
+   
     interpolated_waypoints.append(waypoints[-1])
     return interpolated_waypoints
 
-def calculate_yaw_angle(current_pos:LocationGlobalRelative , center_pos:LocationGlobalRelative)->float:
-    delta_y = center_pos.lat - current_pos.lat
-    delta_x = center_pos.lon - current_pos.lon
-    yaw = math.atan2(delta_y, delta_x)
-    if delta_x*delta_y < 0:
-        yaw = (math.pi/2)-yaw
-    yaw_degrees = yaw * (180 / math.pi)
-    return yaw_degrees
+def calculate_yaw_angle(current_pos: LocationGlobalRelative, center_pos: LocationGlobalRelative) -> float:
+    delta_lat = center_pos.lat - current_pos.lat
+    delta_lon = center_pos.lon - current_pos.lon
+    yaw_rad = math.atan2(delta_lon, delta_lat)  # 注意經度放在前面
+    yaw_deg = math.degrees(yaw_rad)
+    return (yaw_deg + 360) % 360  # 確保角度範圍是 [0, 360)

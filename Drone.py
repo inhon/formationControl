@@ -3,6 +3,7 @@ from pymavlink import mavutil # Needed for command message definitions
 import numpy as np
 import time
 from geopy.distance import geodesic
+from helpers import calculate_distance_lla
 
 
 class Drone():
@@ -10,8 +11,9 @@ class Drone():
     def __init__(self, connection_string):  
         print("Connecting to vehicle on: %s" % connection_string)
         self.connected = True
+        self.home=None
         try:
-            self.vehicle = connect(connection_string, wait_ready=True)
+            self.vehicle = connect(connection_string, wait_ready=True)            
         except Exception as e:
             print(e)
             self.connected = False
@@ -88,12 +90,13 @@ class Drone():
             self.vehicle.commands.download()
             self.vehicle.commands.wait_ready()
             time.sleep(1)
-        return self.vehicle.home_location       
-       
+        self.home=self.vehicle.home_location
+        print(f"get UAV home location.")
+        return self.home      
 
     def condition_yaw(self,heading, relative=False):
         """
-        yaw speed: 90 deg/s
+        yaw speed: 10 deg/s
         """
         if relative:
             is_relative = 1 #yaw relative to direction of travel
@@ -105,7 +108,7 @@ class Drone():
             mavutil.mavlink.MAV_CMD_CONDITION_YAW, #command
             0, #confirmation
             heading,    # param 1, yaw in degrees
-            90,         # param 2, yaw speed deg/s
+            10,         # param 2, yaw speed deg/s
             1,          # param 3, direction -1 ccw, 1 cw
             is_relative, # param 4, relative offset 1, absolute angle 0
             0, 0, 0)    # param 5 ~ 7 not used
@@ -170,11 +173,30 @@ class Drone():
         #print("Close connection to vehicle")
         self.vehicle.close()
 
+    def set_rtl_alt(self, rtl_alt=2000):
+        self.vehicle.parameters['RTL_ALT']=rtl_alt
+        while self.vehicle.parameters['RTL_ALT'] != rtl_alt:
+            self.vehicle.parameters['RTL_ALT']=rtl_alt
+            time.sleep(1)
+        self.vehicle.parameters['WP_YAW_BEHAVIOR']=1
+        while self.vehicle.parameters['WP_YAW_BEHAVIOR'] !=1:
+            self.vehicle.parameters['WP_YAW_BEHAVIOR']=1
+            time.sleep(1)
+        
+        return True
+    
     def rtl(self):
         while(self.vehicle.mode != VehicleMode("RTL")):
             self.vehicle.mode = VehicleMode("RTL")
             time.sleep(0.2)
-        print("RTL")
+        while True:
+            current_location = self.vehicle.location.global_relative_frame
+            distance = calculate_distance_lla(current_location, self.home)
+            if distance < 1.5:  # 設定 1.5 米的容忍範圍
+                break
+            time.sleep(0.5)           
+
+    
     
 
 
